@@ -301,3 +301,123 @@ fn test_get_nonexistent_payment() {
     // Try to get payment that doesn't exist
     client.get_payment(&999);
 }
+
+#[test]
+#[should_panic(expected = "Cannot modify completed payment")]
+fn test_cannot_modify_completed_payment() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_contract = Address::generate(&env);
+    let transaction_contract = Address::generate(&env);
+    let (_, client) = create_contract(&env);
+
+    client.initialize(&admin, &token_contract);
+
+    let payment_id = client.process_payment(&transaction_contract, &1);
+
+    // Complete the payment
+    client.update_payment_status(&payment_id, &PaymentStatus::Completed);
+
+    // Try to modify completed payment - should panic
+    client.update_payment_status(&payment_id, &PaymentStatus::Pending);
+}
+
+#[test]
+#[should_panic(expected = "Cannot modify failed payment")]
+fn test_cannot_modify_failed_payment() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_contract = Address::generate(&env);
+    let transaction_contract = Address::generate(&env);
+    let (_, client) = create_contract(&env);
+
+    client.initialize(&admin, &token_contract);
+
+    let payment_id = client.process_payment(&transaction_contract, &1);
+
+    // Mark payment as failed
+    client.update_payment_status(&payment_id, &PaymentStatus::Failed);
+
+    // Try to modify failed payment - should panic
+    client.update_payment_status(&payment_id, &PaymentStatus::Completed);
+}
+
+#[test]
+#[should_panic(expected = "Cannot modify completed payment")]
+fn test_cannot_change_completed_to_processing() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_contract = Address::generate(&env);
+    let transaction_contract = Address::generate(&env);
+    let (_, client) = create_contract(&env);
+
+    client.initialize(&admin, &token_contract);
+
+    let payment_id = client.process_payment(&transaction_contract, &1);
+
+    // Complete the payment
+    client.update_payment_status(&payment_id, &PaymentStatus::Completed);
+
+    // Try to change to processing - should panic
+    client.update_payment_status(&payment_id, &PaymentStatus::Processing);
+}
+
+#[test]
+#[should_panic(expected = "Cannot modify failed payment")]
+fn test_cannot_change_failed_to_pending() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_contract = Address::generate(&env);
+    let transaction_contract = Address::generate(&env);
+    let (_, client) = create_contract(&env);
+
+    client.initialize(&admin, &token_contract);
+
+    let payment_id = client.process_payment(&transaction_contract, &1);
+
+    // Mark payment as failed
+    client.update_payment_status(&payment_id, &PaymentStatus::Failed);
+
+    // Try to change to pending - should panic
+    client.update_payment_status(&payment_id, &PaymentStatus::Pending);
+}
+
+#[test]
+fn test_valid_status_transitions_allowed() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_contract = Address::generate(&env);
+    let transaction_contract = Address::generate(&env);
+    let (_, client) = create_contract(&env);
+
+    client.initialize(&admin, &token_contract);
+
+    // Test transition from Pending to Processing (should work)
+    let payment_id1 = client.process_payment(&transaction_contract, &1);
+    client.update_payment_status(&payment_id1, &PaymentStatus::Processing);
+    let payment1 = client.get_payment(&payment_id1);
+    assert_eq!(payment1.status, PaymentStatus::Processing);
+
+    // Test transition from Pending to Failed (should work)
+    let payment_id2 = client.process_payment(&transaction_contract, &2);
+    client.update_payment_status(&payment_id2, &PaymentStatus::Failed);
+    let payment2 = client.get_payment(&payment_id2);
+    assert_eq!(payment2.status, PaymentStatus::Failed);
+
+    // Test transition from Processing to Completed (should work)
+    let payment_id3 = client.process_payment(&transaction_contract, &3);
+    client.update_payment_status(&payment_id3, &PaymentStatus::Processing);
+    client.update_payment_status(&payment_id3, &PaymentStatus::Completed);
+    let payment3 = client.get_payment(&payment_id3);
+    assert_eq!(payment3.status, PaymentStatus::Completed);
+}
