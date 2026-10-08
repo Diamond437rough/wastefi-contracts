@@ -59,3 +59,19 @@ pub fn read_balance(env: &Env, address: &Address) -> i128 {
     let key = ("Balance", address);
     env.storage().persistent().get(&key).unwrap_or(0)
 }
+
+/// Write allowance for a spender
+pub fn write_allowance(env: &Env, owner: &Address, spender: &Address, amount: i128) {
+    let key = ("Allowance", owner, spender);
+    env.storage().persistent().set(&key, &amount);
+
+    // Bump storage TTL
+    let storage_key = common::StorageKey::Allowance(owner.clone(), spender.clone());
+    common::bump_persistent(env, &storage_key);
+}
+
+/// Read allowance for a spender
+pub fn read_allowance(env: &Env, owner: &Address, spender: &Address) -> i128 {
+    let key = ("Allowance", owner, spender);
+    env.storage().persistent().get(&key).unwrap_or(0)
+}

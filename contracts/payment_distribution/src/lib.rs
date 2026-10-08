@@ -169,22 +169,79 @@ impl PaymentDistribution {
     ///
     /// # Returns
     /// Vector of payment IDs
+    ///
+    /// # Optimizations
+    /// - Single admin and initialization check for the batch
+    /// - Batch storage operations to minimize redundant reads/writes
+    /// - Single payment counter update for all payments
     pub fn batch_process(env: Env, payments: Vec<(u64, Address, i128)>) -> Vec<u64> {
         common::Initializable::require_initialized(&env).expect("Not initialized");
         common::Pausable::require_not_paused(&env).expect("Contract paused");
 
-        // Get admin and verify
+        // Single admin check for entire batch (optimization)
         let admin = common::AccessControl::get_admin(&env).expect("Admin not found");
         common::AccessControl::require_admin(&env, &admin).expect("Not admin");
 
+        // Get current ledger timestamp once
+        let timestamp = env.ledger().timestamp();
+
+        // Get starting payment count once (optimization)
+        let mut payment_count: u64 = env.storage().instance().get(&PAYMENT_COUNT).unwrap_or(0);
+
         let mut payment_ids = Vec::new(&env);
 
+        // Process all payments with batched storage operations
         for i in 0..payments.len() {
             if let Some((tx_id, recipient, amount)) = payments.get(i) {
-                let payment_id = Self::process_payment(env.clone(), tx_id, recipient, amount);
+                // Validate amount
+                if amount <= 0 {
+                    panic!("Amount must be positive");
+                }
+
+                // Generate next payment ID
+                payment_count += 1;
+                let payment_id = payment_count;
+
+                // Create payment record
+                let payment = Payment {
+                    id: payment_id,
+                    recipient: recipient.clone(),
+                    amount,
+                    status: PaymentStatus::Pending,
+                    transaction_id: tx_id,
+                    created_at: timestamp,
+                    processed_at: 0,
+                };
+
+                // Store payment
+                let key = common::StorageKey::Payment(payment_id);
+                env.storage().persistent().set(&key, &payment);
+                common::bump_persistent(&env, &key);
+
+                // Index by recipient
+                let recipient_key = ("PaymentsByRecipient", recipient.clone());
+                let mut recipient_payments: Vec<u64> = env
+                    .storage()
+                    .persistent()
+                    .get(&recipient_key)
+                    .unwrap_or(Vec::new(&env));
+                recipient_payments.push_back(payment_id);
+                env.storage()
+                    .persistent()
+                    .set(&recipient_key, &recipient_payments);
+
+                // Emit event
+                common::PaymentEvents::created(&env, payment_id, recipient, amount);
+
                 payment_ids.push_back(payment_id);
             }
         }
+
+        // Single update of payment counter (optimization)
+        env.storage().instance().set(&PAYMENT_COUNT, &payment_count);
+
+        // Single storage bump at the end (optimization)
+        common::bump_instance(&env);
 
         payment_ids
     }
@@ -208,6 +265,15 @@ impl PaymentDistribution {
             .persistent()
             .get(&key)
             .expect("Payment not found");
+
+        // CRITICAL: Prevent modification of completed or failed payments
+        // This protects against double-payment scenarios
+        if payment.status == PaymentStatus::Completed {
+            panic!("Cannot modify completed payment");
+        }
+        if payment.status == PaymentStatus::Failed {
+            panic!("Cannot modify failed payment");
+        }
 
         // Update status
         let status_clone = status.clone();

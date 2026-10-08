@@ -7,6 +7,10 @@ use storage::*;
 #[cfg(test)]
 mod test;
 
+// Maximum supply cap: 1 billion tokens with 7 decimals
+// 1_000_000_000 * 10^7 = 10_000_000_000_000_000
+const MAX_SUPPLY: i128 = 10_000_000_000_000_000;
+
 #[contract]
 pub struct WasteToken;
 
@@ -58,6 +62,9 @@ impl WasteToken {
         // Validate amount
         common::validate_amount(amount).expect("Invalid amount");
 
+        // Emit event before storage updates for consistency
+        common::TokenEvents::mint(&env, to.clone(), amount);
+
         // Get current balance
         let current_balance = read_balance(&env, &to);
         let new_balance = current_balance.saturating_add(amount);
@@ -66,12 +73,7 @@ impl WasteToken {
         write_balance(&env, &to, new_balance);
 
         // Update total supply
-        let total_supply = read_total_supply(&env);
-        let new_total_supply = total_supply.saturating_add(amount);
         write_total_supply(&env, new_total_supply);
-
-        // Emit event
-        common::TokenEvents::mint(&env, to.clone(), amount);
 
         // Bump storage
         common::bump_instance(&env);
@@ -102,6 +104,9 @@ impl WasteToken {
 
         let new_balance = current_balance - amount;
 
+        // Emit event before storage updates for consistency
+        common::TokenEvents::burn(&env, from.clone(), amount);
+
         // Update balance
         write_balance(&env, &from, new_balance);
 
@@ -109,9 +114,6 @@ impl WasteToken {
         let total_supply = read_total_supply(&env);
         let new_total_supply = total_supply - amount;
         write_total_supply(&env, new_total_supply);
-
-        // Emit event
-        common::TokenEvents::burn(&env, from.clone(), amount);
 
         // Bump storage
         common::bump_instance(&env);
@@ -142,12 +144,12 @@ impl WasteToken {
             panic!("Insufficient balance");
         }
 
+        // Emit event before storage updates for consistency
+        common::TokenEvents::transfer(&env, from.clone(), to.clone(), amount);
+
         // Update balances
         write_balance(&env, &from, from_balance - amount);
         write_balance(&env, &to, to_balance.saturating_add(amount));
-
-        // Emit event
-        common::TokenEvents::transfer(&env, from.clone(), to.clone(), amount);
 
         // Bump storage
         common::bump_instance(&env);
