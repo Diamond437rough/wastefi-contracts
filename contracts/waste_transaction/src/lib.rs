@@ -10,6 +10,7 @@ mod test;
 
 const MATERIAL_PRICING_CONTRACT: &str = "MaterialPricingContract";
 const REPUTATION_CONTRACT: &str = "ReputationContract";
+const COLLECTOR_REGISTRY_CONTRACT: &str = "CollectorRegistryContract";
 
 #[contract]
 pub struct WasteTransaction;
@@ -68,6 +69,22 @@ impl WasteTransaction {
         common::bump_instance(&env);
     }
 
+    /// Set collector registry contract address (admin only)
+    ///
+    /// # Arguments
+    /// * `contract_address` - CollectorRegistry contract address
+    pub fn set_collector_registry_contract(env: Env, contract_address: Address) {
+        common::Initializable::require_initialized(&env).expect("Not initialized");
+
+        let admin = common::AccessControl::get_admin(&env).expect("Admin not found");
+        common::AccessControl::require_admin(&env, &admin).expect("Not admin");
+
+        env.storage()
+            .instance()
+            .set(&COLLECTOR_REGISTRY_CONTRACT, &contract_address);
+        common::bump_instance(&env);
+    }
+
     /// Get material pricing contract address
     pub fn get_material_pricing_contract(env: Env) -> Option<Address> {
         env.storage().instance().get(&MATERIAL_PRICING_CONTRACT)
@@ -76,6 +93,11 @@ impl WasteTransaction {
     /// Get reputation contract address
     pub fn get_reputation_contract(env: Env) -> Option<Address> {
         env.storage().instance().get(&REPUTATION_CONTRACT)
+    }
+
+    /// Get collector registry contract address
+    pub fn get_collector_registry_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&COLLECTOR_REGISTRY_CONTRACT)
     }
 
     /// Record a new waste collection transaction
@@ -99,6 +121,24 @@ impl WasteTransaction {
     ) -> u64 {
         common::Initializable::require_initialized(&env).expect("Not initialized");
         common::Pausable::require_not_paused(&env).expect("Contract paused");
+
+        // Validate collector status before proceeding
+        if let Some(registry_contract) = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&COLLECTOR_REGISTRY_CONTRACT)
+        {
+            // Cross-contract call to check if collector is active
+            let is_active: bool = env.invoke_contract(
+                &registry_contract,
+                &soroban_sdk::symbol_short!("is_active"),
+                soroban_sdk::vec![&env, collector.clone().into_val(&env)],
+            );
+
+            if !is_active {
+                panic!("Collector is not active");
+            }
+        }
 
         // Fraud detection checks
         // 1. Check if collector is flagged for critical risk
@@ -201,6 +241,24 @@ impl WasteTransaction {
     ) -> u64 {
         common::Initializable::require_initialized(&env).expect("Not initialized");
         common::Pausable::require_not_paused(&env).expect("Contract paused");
+
+        // Validate collector status before proceeding
+        if let Some(registry_contract) = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&COLLECTOR_REGISTRY_CONTRACT)
+        {
+            // Cross-contract call to check if collector is active
+            let is_active: bool = env.invoke_contract(
+                &registry_contract,
+                &soroban_sdk::symbol_short!("is_active"),
+                soroban_sdk::vec![&env, collector.clone().into_val(&env)],
+            );
+
+            if !is_active {
+                panic!("Collector is not active");
+            }
+        }
 
         // Validate weight
         common::validation::validate_weight_bounds(weight).expect("Invalid weight");

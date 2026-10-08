@@ -756,3 +756,254 @@ fn test_time_travel() {
     let new_time = env.ledger().timestamp();
     assert_eq!(new_time, initial_time + 1000);
 }
+
+// ============================================================================
+// Collector Status Validation Tests (Issue #8)
+// ============================================================================
+
+#[test]
+fn test_active_collector_can_submit_transaction() {
+    let test_env = WasteFiTestEnv::new();
+
+    // Register and activate collector
+    let collector = Address::generate(&test_env.env);
+    test_env.collector_registry.register(
+        &collector,
+        &String::from_str(&test_env.env, "Active Collector"),
+        &String::from_str(&test_env.env, "+1234567890"),
+    );
+    test_env
+        .collector_registry
+        .update_status(&collector, &CollectorStatus::Active);
+
+    // Register collection point
+    let point_owner = Address::generate(&test_env.env);
+    let point_id = test_env.collection_point.register(
+        &point_owner,
+        &String::from_str(&test_env.env, "Test Point"),
+        &String::from_str(&test_env.env, "123 Test St"),
+    );
+
+    // Configure waste_transaction to use collector_registry
+    let registry_id = test_env.env.register_contract(None, CollectorRegistry);
+    test_env
+        .waste_transaction
+        .set_collector_registry_contract(&registry_id);
+
+    // Active collector should be able to submit transaction
+    let tx_id = test_env.waste_transaction.record_collection(
+        &collector,
+        &point_id,
+        &MaterialType::Plastic,
+        &5000,
+        &8_000_000,
+    );
+
+    // Verify transaction was recorded
+    let tx = test_env.waste_transaction.get_transaction(&tx_id);
+    assert_eq!(tx.collector, collector);
+    assert_eq!(tx.status, TransactionStatus::Pending);
+}
+
+#[test]
+#[should_panic(expected = "Collector is not active")]
+fn test_pending_collector_cannot_submit_transaction() {
+    let test_env = WasteFiTestEnv::new();
+
+    // Register collector but don't activate (status remains Pending)
+    let collector = Address::generate(&test_env.env);
+    test_env.collector_registry.register(
+        &collector,
+        &String::from_str(&test_env.env, "Pending Collector"),
+        &String::from_str(&test_env.env, "+9876543210"),
+    );
+
+    let point_id = test_env.collection_point.register(
+        &Address::generate(&test_env.env),
+        &String::from_str(&test_env.env, "Test Point"),
+        &String::from_str(&test_env.env, "456 Test Ave"),
+    );
+
+    // Configure waste_transaction to use collector_registry
+    let registry_id = test_env.env.register_contract(None, CollectorRegistry);
+    test_env
+        .waste_transaction
+        .set_collector_registry_contract(&registry_id);
+
+    // Pending collector should NOT be able to submit - should panic
+    test_env.waste_transaction.record_collection(
+        &collector,
+        &point_id,
+        &MaterialType::Plastic,
+        &5000,
+        &8_000_000,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Collector is not active")]
+fn test_suspended_collector_cannot_submit_transaction() {
+    let test_env = WasteFiTestEnv::new();
+
+    // Register and activate collector
+    let collector = Address::generate(&test_env.env);
+    test_env.collector_registry.register(
+        &collector,
+        &String::from_str(&test_env.env, "Suspended Collector"),
+        &String::from_str(&test_env.env, "+5555555555"),
+    );
+    test_env
+        .collector_registry
+        .update_status(&collector, &CollectorStatus::Active);
+
+    // Later, suspend the collector
+    test_env
+        .collector_registry
+        .update_status(&collector, &CollectorStatus::Suspended);
+
+    let point_id = test_env.collection_point.register(
+        &Address::generate(&test_env.env),
+        &String::from_str(&test_env.env, "Test Point"),
+        &String::from_str(&test_env.env, "789 Test Blvd"),
+    );
+
+    // Configure waste_transaction to use collector_registry
+    let registry_id = test_env.env.register_contract(None, CollectorRegistry);
+    test_env
+        .waste_transaction
+        .set_collector_registry_contract(&registry_id);
+
+    // Suspended collector should NOT be able to submit - should panic
+    test_env.waste_transaction.record_collection(
+        &collector,
+        &point_id,
+        &MaterialType::Glass,
+        &3000,
+        &5_000_000,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Collector is not active")]
+fn test_banned_collector_cannot_submit_transaction() {
+    let test_env = WasteFiTestEnv::new();
+
+    // Register and activate collector
+    let collector = Address::generate(&test_env.env);
+    test_env.collector_registry.register(
+        &collector,
+        &String::from_str(&test_env.env, "Banned Collector"),
+        &String::from_str(&test_env.env, "+7777777777"),
+    );
+    test_env
+        .collector_registry
+        .update_status(&collector, &CollectorStatus::Active);
+
+    // Ban the collector
+    test_env
+        .collector_registry
+        .update_status(&collector, &CollectorStatus::Banned);
+
+    let point_id = test_env.collection_point.register(
+        &Address::generate(&test_env.env),
+        &String::from_str(&test_env.env, "Test Point"),
+        &String::from_str(&test_env.env, "321 Test Ln"),
+    );
+
+    // Configure waste_transaction to use collector_registry
+    let registry_id = test_env.env.register_contract(None, CollectorRegistry);
+    test_env
+        .waste_transaction
+        .set_collector_registry_contract(&registry_id);
+
+    // Banned collector should NOT be able to submit - should panic
+    test_env.waste_transaction.record_collection(
+        &collector,
+        &point_id,
+        &MaterialType::Metal,
+        &4000,
+        &15_000_000,
+    );
+}
+
+#[test]
+fn test_collector_status_change_affects_future_transactions() {
+    let test_env = WasteFiTestEnv::new();
+
+    // Register and activate collector
+    let collector = Address::generate(&test_env.env);
+    test_env.collector_registry.register(
+        &collector,
+        &String::from_str(&test_env.env, "Status Change Collector"),
+        &String::from_str(&test_env.env, "+9999999999"),
+    );
+    test_env
+        .collector_registry
+        .update_status(&collector, &CollectorStatus::Active);
+
+    let point_id = test_env.collection_point.register(
+        &Address::generate(&test_env.env),
+        &String::from_str(&test_env.env, "Test Point"),
+        &String::from_str(&test_env.env, "555 Test Dr"),
+    );
+
+    // Configure waste_transaction to use collector_registry
+    let registry_id = test_env.env.register_contract(None, CollectorRegistry);
+    test_env
+        .waste_transaction
+        .set_collector_registry_contract(&registry_id);
+
+    // First transaction should succeed (collector is active)
+    let tx_id_1 = test_env.waste_transaction.record_collection(
+        &collector,
+        &point_id,
+        &MaterialType::Plastic,
+        &2000,
+        &8_000_000,
+    );
+    assert_eq!(tx_id_1, 1);
+
+    // Suspend the collector
+    test_env
+        .collector_registry
+        .update_status(&collector, &CollectorStatus::Suspended);
+
+    // Second transaction should fail (collector is now suspended)
+    let result = std::panic::catch_unwind(|| {
+        test_env.waste_transaction.record_collection(
+            &collector,
+            &point_id,
+            &MaterialType::Plastic,
+            &2000,
+            &8_000_000,
+        )
+    });
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_transaction_without_registry_configured_works() {
+    let test_env = WasteFiTestEnv::new();
+
+    // Don't configure collector registry contract
+    let collector = Address::generate(&test_env.env);
+    let point_id = test_env.collection_point.register(
+        &Address::generate(&test_env.env),
+        &String::from_str(&test_env.env, "Test Point"),
+        &String::from_str(&test_env.env, "999 Test Way"),
+    );
+
+    // Without collector registry configured, validation should be skipped
+    // and transaction should succeed
+    let tx_id = test_env.waste_transaction.record_collection(
+        &collector,
+        &point_id,
+        &MaterialType::Electronics,
+        &1000,
+        &25_000_000,
+    );
+
+    assert_eq!(tx_id, 1);
+    let tx = test_env.waste_transaction.get_transaction(&tx_id);
+    assert_eq!(tx.collector, collector);
+}
