@@ -276,3 +276,152 @@ fn test_zero_balance_default() {
     // Check balance is 0 for address that never received tokens
     assert_eq!(client.balance(&user), 0);
 }
+
+#[test]
+fn test_get_max_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+
+    // Check max supply is 1 billion with 7 decimals
+    assert_eq!(client.get_max_supply(), 10_000_000_000_000_000i128);
+}
+
+#[test]
+fn test_get_remaining_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+
+    // Initially all supply is remaining
+    assert_eq!(client.get_remaining_supply(), 10_000_000_000_000_000i128);
+
+    // Mint some tokens
+    client.mint(&user, &1_000_000_000_000_000i128);
+
+    // Check remaining supply decreased
+    assert_eq!(client.get_remaining_supply(), 9_000_000_000_000_000i128);
+}
+
+#[test]
+#[should_panic(expected = "Minting would exceed maximum supply cap")]
+fn test_cannot_exceed_max_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+
+    // Try to mint more than max supply - should panic
+    client.mint(&user, &10_000_000_000_000_001i128);
+}
+
+#[test]
+#[should_panic(expected = "Minting would exceed maximum supply cap")]
+fn test_cannot_exceed_max_supply_cumulative() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+
+    // Mint up to max supply
+    client.mint(&user, &10_000_000_000_000_000i128);
+
+    // Try to mint even 1 more token - should panic
+    client.mint(&user, &1);
+}
+
+#[test]
+fn test_can_mint_exactly_max_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+
+    // Mint exactly max supply - should succeed
+    client.mint(&user, &10_000_000_000_000_000i128);
+
+    assert_eq!(client.total_supply(), 10_000_000_000_000_000i128);
+    assert_eq!(client.balance(&user), 10_000_000_000_000_000i128);
+    assert_eq!(client.get_remaining_supply(), 0);
+}
+
+#[test]
+fn test_can_mint_after_burn() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+
+    // Mint up to max supply
+    client.mint(&user, &10_000_000_000_000_000i128);
+
+    // Burn some tokens
+    client.burn(&user, &1_000_000_000_000_000i128);
+
+    // Should be able to mint again after burning
+    client.mint(&user, &500_000_000_000_000i128);
+
+    assert_eq!(client.total_supply(), 9_500_000_000_000_000i128);
+    assert_eq!(client.get_remaining_supply(), 500_000_000_000_000i128);
+}
