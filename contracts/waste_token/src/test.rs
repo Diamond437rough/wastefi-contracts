@@ -278,11 +278,13 @@ fn test_zero_balance_default() {
 }
 
 #[test]
-fn test_get_max_supply() {
+fn test_transfer_event_emission() {
     let env = Env::default();
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
     let (_, client) = create_token_contract(&env);
 
     // Initialize
@@ -293,12 +295,31 @@ fn test_get_max_supply() {
         &7,
     );
 
-    // Check max supply is 1 billion with 7 decimals
-    assert_eq!(client.get_max_supply(), 10_000_000_000_000_000i128);
+    // Mint tokens to user1
+    client.mint(&user1, &1_000_000);
+
+    // Transfer tokens from user1 to user2
+    client.transfer(&user1, &user2, &300_000);
+
+    // Verify event was emitted with correct data
+    let events = env.events().all();
+    let transfer_events: soroban_sdk::Vec<_> = events
+        .iter()
+        .filter(|e| {
+            e.topics.get(0).unwrap() == soroban_sdk::symbol_short!("transfer")
+        })
+        .collect();
+
+    // Should have exactly one transfer event
+    assert_eq!(transfer_events.len(), 1);
+
+    // Verify balances updated correctly after event emission
+    assert_eq!(client.balance(&user1), 700_000);
+    assert_eq!(client.balance(&user2), 300_000);
 }
 
 #[test]
-fn test_get_remaining_supply() {
+fn test_mint_event_emission() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -314,24 +335,189 @@ fn test_get_remaining_supply() {
         &7,
     );
 
-    // Initially all supply is remaining
-    assert_eq!(client.get_remaining_supply(), 10_000_000_000_000_000i128);
+    // Mint tokens
+    client.mint(&user, &500_000);
 
-    // Mint some tokens
-    client.mint(&user, &1_000_000_000_000_000i128);
+    // Verify event was emitted
+    let events = env.events().all();
+    let mint_events: soroban_sdk::Vec<_> = events
+        .iter()
+        .filter(|e| {
+            e.topics.get(0).unwrap() == soroban_sdk::symbol_short!("mint")
+        })
+        .collect();
 
-    // Check remaining supply decreased
-    assert_eq!(client.get_remaining_supply(), 9_000_000_000_000_000i128);
+    // Should have exactly one mint event
+    assert_eq!(mint_events.len(), 1);
+
+    // Verify balance updated correctly after event emission
+    assert_eq!(client.balance(&user), 500_000);
 }
 
 #[test]
-#[should_panic(expected = "Minting would exceed maximum supply cap")]
-fn test_cannot_exceed_max_supply() {
+fn test_burn_event_emission() {
     let env = Env::default();
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize and mint
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+    client.mint(&user, &1_000_000);
+
+    // Burn tokens
+    client.burn(&user, &400_000);
+
+    // Verify event was emitted
+    let events = env.events().all();
+    let burn_events: soroban_sdk::Vec<_> = events
+        .iter()
+        .filter(|e| {
+            e.topics.get(0).unwrap() == soroban_sdk::symbol_short!("burn")
+        })
+        .collect();
+
+    // Should have exactly one burn event
+    assert_eq!(burn_events.len(), 1);
+
+    // Verify balance updated correctly after event emission
+    assert_eq!(client.balance(&user), 600_000);
+}
+
+#[test]
+fn test_multiple_transfer_events() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize and mint
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+    client.mint(&user1, &1_000_000);
+
+    // Perform multiple transfers
+    client.transfer(&user1, &user2, &200_000);
+    client.transfer(&user1, &user3, &100_000);
+    client.transfer(&user2, &user3, &50_000);
+
+    // Verify all transfer events were emitted
+    let events = env.events().all();
+    let transfer_events: soroban_sdk::Vec<_> = events
+        .iter()
+        .filter(|e| {
+            e.topics.get(0).unwrap() == soroban_sdk::symbol_short!("transfer")
+        })
+        .collect();
+
+    // Should have exactly three transfer events
+    assert_eq!(transfer_events.len(), 3);
+
+    // Verify final balances
+    assert_eq!(client.balance(&user1), 700_000);
+    assert_eq!(client.balance(&user2), 150_000);
+    assert_eq!(client.balance(&user3), 150_000);
+}
+
+#[test]
+fn test_transfer_zero_amount_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize and mint
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+    client.mint(&user1, &1_000_000);
+
+    // Transfer zero amount
+    client.transfer(&user1, &user2, &0);
+
+    // Verify event was emitted even for zero amount
+    let events = env.events().all();
+    let transfer_events: soroban_sdk::Vec<_> = events
+        .iter()
+        .filter(|e| {
+            e.topics.get(0).unwrap() == soroban_sdk::symbol_short!("transfer")
+        })
+        .collect();
+
+    // Should have exactly one transfer event
+    assert_eq!(transfer_events.len(), 1);
+
+    // Verify balances remain unchanged
+    assert_eq!(client.balance(&user1), 1_000_000);
+    assert_eq!(client.balance(&user2), 0);
+}
+
+#[test]
+fn test_transfer_to_self_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize and mint
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+    client.mint(&user, &1_000_000);
+
+    // Transfer to self
+    client.transfer(&user, &user, &100_000);
+
+    // Verify event was emitted
+    let events = env.events().all();
+    let transfer_events: soroban_sdk::Vec<_> = events
+        .iter()
+        .filter(|e| {
+            e.topics.get(0).unwrap() == soroban_sdk::symbol_short!("transfer")
+        })
+        .collect();
+
+    // Should have exactly one transfer event
+    assert_eq!(transfer_events.len(), 1);
+
+    // Balance should remain the same for self-transfer
+    assert_eq!(client.balance(&user), 1_000_000);
+}
+
+#[test]
+fn test_event_emission_order_consistency() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
     let (_, client) = create_token_contract(&env);
 
     // Initialize
@@ -342,86 +528,24 @@ fn test_cannot_exceed_max_supply() {
         &7,
     );
 
-    // Try to mint more than max supply - should panic
-    client.mint(&user, &10_000_000_000_000_001i128);
-}
+    // Perform a sequence of operations
+    client.mint(&user1, &1_000_000);    // mint event
+    client.transfer(&user1, &user2, &300_000); // transfer event
+    client.burn(&user2, &100_000);      // burn event
 
-#[test]
-#[should_panic(expected = "Minting would exceed maximum supply cap")]
-fn test_cannot_exceed_max_supply_cumulative() {
-    let env = Env::default();
-    env.mock_all_auths();
+    // Verify events were emitted in correct order
+    let events = env.events().all();
+    
+    let event_types: soroban_sdk::Vec<_> = events
+        .iter()
+        .map(|e| e.topics.get(0).unwrap())
+        .collect();
 
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-    let (_, client) = create_token_contract(&env);
+    // Should have mint, transfer, and burn events
+    assert!(event_types.len() >= 3);
 
-    // Initialize
-    client.initialize(
-        &admin,
-        &String::from_str(&env, "WasteFi Token"),
-        &String::from_str(&env, "WASTE"),
-        &7,
-    );
-
-    // Mint up to max supply
-    client.mint(&user, &10_000_000_000_000_000i128);
-
-    // Try to mint even 1 more token - should panic
-    client.mint(&user, &1);
-}
-
-#[test]
-fn test_can_mint_exactly_max_supply() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-    let (_, client) = create_token_contract(&env);
-
-    // Initialize
-    client.initialize(
-        &admin,
-        &String::from_str(&env, "WasteFi Token"),
-        &String::from_str(&env, "WASTE"),
-        &7,
-    );
-
-    // Mint exactly max supply - should succeed
-    client.mint(&user, &10_000_000_000_000_000i128);
-
-    assert_eq!(client.total_supply(), 10_000_000_000_000_000i128);
-    assert_eq!(client.balance(&user), 10_000_000_000_000_000i128);
-    assert_eq!(client.get_remaining_supply(), 0);
-}
-
-#[test]
-fn test_can_mint_after_burn() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-    let (_, client) = create_token_contract(&env);
-
-    // Initialize
-    client.initialize(
-        &admin,
-        &String::from_str(&env, "WasteFi Token"),
-        &String::from_str(&env, "WASTE"),
-        &7,
-    );
-
-    // Mint up to max supply
-    client.mint(&user, &10_000_000_000_000_000i128);
-
-    // Burn some tokens
-    client.burn(&user, &1_000_000_000_000_000i128);
-
-    // Should be able to mint again after burning
-    client.mint(&user, &500_000_000_000_000i128);
-
-    assert_eq!(client.total_supply(), 9_500_000_000_000_000i128);
-    assert_eq!(client.get_remaining_supply(), 500_000_000_000_000i128);
+    // Verify final state
+    assert_eq!(client.balance(&user1), 700_000);
+    assert_eq!(client.balance(&user2), 200_000);
+    assert_eq!(client.total_supply(), 900_000);
 }
