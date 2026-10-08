@@ -19,6 +19,11 @@ impl TokenEvents {
         env.events()
             .publish((symbol_short!("transfer"),), (from, to, amount));
     }
+
+    pub fn approve(env: &Env, owner: Address, spender: Address, amount: i128) {
+        env.events()
+            .publish((symbol_short!("approve"),), (owner, spender, amount));
+    }
 }
 
 /// Collector events
