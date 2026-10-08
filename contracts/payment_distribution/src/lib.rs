@@ -209,6 +209,15 @@ impl PaymentDistribution {
             .get(&key)
             .expect("Payment not found");
 
+        // CRITICAL: Prevent modification of completed or failed payments
+        // This protects against double-payment scenarios
+        if payment.status == PaymentStatus::Completed {
+            panic!("Cannot modify completed payment");
+        }
+        if payment.status == PaymentStatus::Failed {
+            panic!("Cannot modify failed payment");
+        }
+
         // Update status
         let status_clone = status.clone();
         payment.status = status;
