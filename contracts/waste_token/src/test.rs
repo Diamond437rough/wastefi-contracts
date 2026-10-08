@@ -276,3 +276,141 @@ fn test_zero_balance_default() {
     // Check balance is 0 for address that never received tokens
     assert_eq!(client.balance(&user), 0);
 }
+
+#[test]
+fn test_batch_burn_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize and mint to multiple users
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+    client.mint(&user1, &1_000_000);
+    client.mint(&user2, &500_000);
+    client.mint(&user3, &800_000);
+
+    // Create batch burn vector
+    let mut burns = soroban_sdk::Vec::new(&env);
+    burns.push_back((user1.clone(), 300_000i128));
+    burns.push_back((user2.clone(), 200_000i128));
+    burns.push_back((user3.clone(), 100_000i128));
+
+    // Execute batch burn
+    let burn_count = client.batch_burn(&burns);
+
+    // Verify all burns succeeded
+    assert_eq!(burn_count, 3);
+    assert_eq!(client.balance(&user1), 700_000);
+    assert_eq!(client.balance(&user2), 300_000);
+    assert_eq!(client.balance(&user3), 700_000);
+    assert_eq!(client.total_supply(), 1_700_000);
+}
+
+#[test]
+fn test_batch_burn_partial_failure() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize and mint
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+    client.mint(&user1, &1_000_000);
+    client.mint(&user2, &200_000);
+    client.mint(&user3, &800_000);
+
+    // Create batch burn vector with one insufficient balance
+    let mut burns = soroban_sdk::Vec::new(&env);
+    burns.push_back((user1.clone(), 300_000i128));
+    burns.push_back((user2.clone(), 500_000i128)); // This should fail - insufficient balance
+    burns.push_back((user3.clone(), 100_000i128));
+
+    // Execute batch burn
+    let burn_count = client.batch_burn(&burns);
+
+    // Verify only 2 burns succeeded
+    assert_eq!(burn_count, 2);
+    assert_eq!(client.balance(&user1), 700_000);
+    assert_eq!(client.balance(&user2), 200_000); // Unchanged
+    assert_eq!(client.balance(&user3), 700_000);
+    assert_eq!(client.total_supply(), 1_600_000);
+}
+
+#[test]
+fn test_batch_burn_empty_vector() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+
+    // Create empty batch burn vector
+    let burns = soroban_sdk::Vec::new(&env);
+
+    // Execute batch burn
+    let burn_count = client.batch_burn(&burns);
+
+    // Verify no burns occurred
+    assert_eq!(burn_count, 0);
+}
+
+#[test]
+fn test_batch_burn_invalid_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let (_, client) = create_token_contract(&env);
+
+    // Initialize and mint
+    client.initialize(
+        &admin,
+        &String::from_str(&env, "WasteFi Token"),
+        &String::from_str(&env, "WASTE"),
+        &7,
+    );
+    client.mint(&user1, &1_000_000);
+    client.mint(&user2, &500_000);
+
+    // Create batch burn vector with invalid amount
+    let mut burns = soroban_sdk::Vec::new(&env);
+    burns.push_back((user1.clone(), 300_000i128));
+    burns.push_back((user2.clone(), -100_000i128)); // Invalid negative amount
+
+    // Execute batch burn
+    let burn_count = client.batch_burn(&burns);
+
+    // Verify only valid burn succeeded
+    assert_eq!(burn_count, 1);
+    assert_eq!(client.balance(&user1), 700_000);
+    assert_eq!(client.balance(&user2), 500_000); // Unchanged
+}

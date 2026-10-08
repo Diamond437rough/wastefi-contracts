@@ -221,4 +221,61 @@ impl WasteToken {
     pub fn admin(env: Env) -> Address {
         common::AccessControl::get_admin(&env).expect("Admin not found")
     }
+
+    /// Batch burn tokens from multiple accounts
+    ///
+    /// # Arguments
+    /// * `burns` - Vector of (from, amount) tuples
+    ///
+    /// # Returns
+    /// Number of burns successfully completed
+    ///
+    /// # Note
+    /// Each burn operation requires authorization from the respective account
+    pub fn batch_burn(env: Env, burns: soroban_sdk::Vec<(Address, i128)>) -> u32 {
+        common::Initializable::require_initialized(&env).expect("Not initialized");
+        common::Pausable::require_not_paused(&env).expect("Contract paused");
+
+        let mut burn_count = 0u32;
+
+        for i in 0..burns.len() {
+            if let Some((from, amount)) = burns.get(i) {
+                // Require authorization from the account burning
+                from.require_auth();
+
+                // Validate amount
+                if common::validate_amount(amount).is_err() {
+                    continue;
+                }
+
+                // Get current balance
+                let current_balance = read_balance(&env, &from);
+
+                // Check sufficient balance
+                if current_balance < amount {
+                    continue;
+                }
+
+                let new_balance = current_balance - amount;
+
+                // Update balance
+                write_balance(&env, &from, new_balance);
+
+                // Update total supply
+                let total_supply = read_total_supply(&env);
+                let new_total_supply = total_supply - amount;
+                write_total_supply(&env, new_total_supply);
+
+                // Emit event
+                common::TokenEvents::burn(&env, from.clone(), amount);
+
+                burn_count += 1;
+            }
+        }
+
+        // Bump storage
+        common::bump_instance(&env);
+
+        burn_count
+    }
 }
